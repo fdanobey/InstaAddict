@@ -96,6 +96,9 @@ class ResourceID:
         self.PROFILE_HEADER_AVATAR_CONTAINER_TOP_LEFT_STUB = (
             f"{APP_ID}:id/profile_header_avatar_container_top_left_stub"
         )
+        self.TOUCH_INTERCEPTOR_EXPANDED_PROFILE_PIC = (
+            f"{APP_ID}:id/touch_interceptor_expanded_profile_pic"
+        )
         self.PROFILE_TAB_LAYOUT = f"{APP_ID}:id/profile_tab_layout"
         self.PROFILE_TAB_ICON_VIEW = f"{APP_ID}:id/profile_tab_icon_view"
         self.PROFILE_TABS_CONTAINER = f"{APP_ID}:id/profile_tabs_container"
@@ -120,6 +123,7 @@ class ResourceID:
         self.ROW_FEED_LIKE_COUNT_FACEPILE_STUB = (
             f"{APP_ID}:id/row_feed_like_count_facepile_stub"
         )
+        self.ROW_FEED_PHOTO_IMAGEVIEW = f"{APP_ID}:id/row_feed_photo_imageview"
         self.ROW_FEED_PHOTO_PROFILE_NAME = f"{APP_ID}:id/row_feed_photo_profile_name"
         self.ROW_FEED_TEXTVIEW_LIKES = f"{APP_ID}:id/row_feed_textview_likes"
         self.ROW_FEED_VIEW_GROUP_BUTTONS = f"{APP_ID}:id/row_feed_view_group_buttons"
