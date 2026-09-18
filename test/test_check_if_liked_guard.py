@@ -15,7 +15,7 @@ class FakeView:
 
 
 def _make(like_button_exists, liked_marker_exists=False):
-    """device.find() отдаёт кнопку лайка по resourceIdMatches, маркер по desc."""
+    """find() returns the like button by resourceIdMatches, the marker by desc."""
     state = SimpleNamespace(swipes=0)
 
     def find(**kw):
@@ -39,7 +39,7 @@ def _run(obj, state):
 def test_no_like_button_gives_up_instead_of_hanging():
     obj, state = _make(like_button_exists=False)
     assert _run(obj, state) is False
-    assert state.swipes == 3, state.swipes  # ограничено, а не бесконечно
+    assert state.swipes == 3, state.swipes  # capped, not endless
 
 
 def test_like_detected():

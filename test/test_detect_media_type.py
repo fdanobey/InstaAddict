@@ -1,7 +1,7 @@
-"""IG 447 описывает карусель как 'Photo 1 of 4 by ...' — старая ветка ^Photo
-классифицирует её как одиночное фото. См. RESEARCH-2026-09-18-ig447.md.
+"""IG 447 describes a carousel element as 'Photo 1 of 4 by ...', which the old
+^Photo branch classified as a single photo.
 
-Запуск: PYTHONPATH=. .venv/bin/python test/test_detect_media_type.py
+Run: PYTHONPATH=. python test/test_detect_media_type.py
 """
 
 from InstaAddict.core.views import MediaType, PostsViewList

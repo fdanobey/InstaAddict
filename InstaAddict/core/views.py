@@ -1249,7 +1249,7 @@ class PostsViewList:
             return media, None
         content_desc = media.get_desc()
         if not content_desc:
-            # IG 447+: описание переехало из media_group во вложенный image view
+            # IG 447+: the description moved from media_group to its inner image view
             inner = media.child(
                 resourceIdMatches=(
                     f"{ResourceID.ROW_FEED_PHOTO_IMAGEVIEW}|{ResourceID.CAROUSEL_IMAGE}"

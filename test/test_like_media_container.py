@@ -1,7 +1,7 @@
-"""Регресс на IG 447: content-desc поста переехал из media_group во вложенный
-row_feed_photo_imageview / carousel_image (см. RESEARCH-2026-09-18-ig447.md).
+"""Regression check for IG 447: the post content-desc moved from media_group to
+the nested row_feed_photo_imageview / carousel_image.
 
-Запуск: PYTHONPATH=. .venv/bin/python test/test_like_media_container.py
+Run: PYTHONPATH=. python test/test_like_media_container.py
 """
 
 from types import SimpleNamespace
@@ -12,7 +12,7 @@ views.ResourceID = views.resources("com.instagram.android")
 
 
 class FakeView:
-    """Минимальная замена DeviceFacade.View."""
+    """Minimal stand-in for DeviceFacade.View."""
 
     def __init__(self, desc=None, exists=True, children=None):
         self.desc = desc
