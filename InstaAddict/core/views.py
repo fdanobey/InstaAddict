@@ -1263,13 +1263,25 @@ class PostsViewList:
         # bottom of the list. They match the same ids but describe nothing, and
         # being first in the tree they used to win, which sent the double tap into
         # the header. Take the first match that actually describes a post.
-        for index in range(media.count_items()):
+        total = media.count_items()
+        logger.debug(f"[likedbg] media candidates on screen: {total}")
+        for index in range(total):
             candidate = self.device.find(
                 resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP, index=index
             )
             content_desc = self._describes_a_post(candidate)
+            try:
+                box = candidate.get_bounds()
+                geom = f"y={box['top']}-{box['bottom']} h={box['bottom'] - box['top']}"
+            except DeviceFacade.JsonRpcError:
+                geom = "bounds unavailable"
+            logger.debug(
+                f"[likedbg]   media[{index}] {geom} desc={str(content_desc)[:48]!r}"
+            )
             if content_desc:
+                logger.debug(f"[likedbg]   -> taking media[{index}]")
                 return candidate, content_desc
+        logger.debug("[likedbg]   -> no described media, giving up")
         return media, None
 
     def _get_like_button_of(self, media):
@@ -1284,16 +1296,32 @@ class PostsViewList:
         except DeviceFacade.JsonRpcError:
             media_bottom = 0
         best = None
-        for index in range(buttons.count_items()):
+        total = buttons.count_items()
+        logger.debug(
+            f"[likedbg] hearts on screen: {total}, media bottom={media_bottom}"
+        )
+        for index in range(total):
             candidate = self.device.find(
                 resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE, index=index
             )
             try:
                 top = candidate.get_bounds()["top"]
+                desc = candidate.get_desc()
             except DeviceFacade.JsonRpcError:
+                logger.debug(f"[likedbg]   heart[{index}] vanished while reading it")
                 continue
-            if top >= media_bottom and (best is None or top < best[0]):
+            below = top >= media_bottom
+            logger.debug(
+                f"[likedbg]   heart[{index}] top={top} desc={desc!r} "
+                f"{'below media' if below else 'ABOVE media - other post'}"
+            )
+            if below and (best is None or top < best[0]):
                 best = (top, candidate)
+        logger.debug(
+            f"[likedbg]   -> paired heart at top={best[0]}"
+            if best
+            else "[likedbg]   -> no heart belongs to this post"
+        )
         return best[1] if best else None
 
     @staticmethod
@@ -1360,23 +1388,50 @@ class PostsViewList:
         if skip_media_check:
             return
         media, content_desc = self._get_media_container()
+        media_type = None
         if content_desc is None:
-            logger.debug("Media container has no description, skip like.")
-            return
-        if not already_watched:
+            if mode == LikeMode.DOUBLE_CLICK:
+                logger.debug("Media container has no description, skip like.")
+                return
+            # A single click only needs the media to pair the heart with its post,
+            # and by the time the retry runs the feed has usually scrolled. Bailing
+            # out here is what stopped the retry from ever pressing anything.
+            logger.debug(
+                "Media container has no description, pressing the heart anyway."
+            )
+        elif not already_watched:
             media_type, _ = post_view_list.detect_media_type(content_desc)
             opened_post_view.watch_media(media_type)
+        logger.debug(
+            f"[likedbg] like path: mode={mode.name} media_type="
+            f"{media_type.name if media_type else None} already_watched={already_watched}"
+        )
         if mode == LikeMode.DOUBLE_CLICK:
             if media_type in (MediaType.CAROUSEL, MediaType.PHOTO):
-                logger.info("Double click on post.")
-                _, _, action_bar_bottom = PostsViewList(
-                    self.device
-                )._get_action_bar_position()
-                media.double_click(obj_over=action_bar_bottom)
+                # Pressing the heart is the reliable path on IG 447: in one run
+                # double tapping the media registered 1 like out of 9 attempts,
+                # while the button toggles content-desc Like <-> Liked every time.
+                # Keep the double tap for layouts where no heart can be paired.
+                like_button = self._get_like_button_of(media)
+                if like_button is not None:
+                    logger.info("Clicking on the little heart ❤️.")
+                    like_button.click()
+                else:
+                    logger.info("Double click on post.")
+                    _, _, action_bar_bottom = PostsViewList(
+                        self.device
+                    )._get_action_bar_position()
+                    media.double_click(obj_over=action_bar_bottom)
             else:
-                self._like_in_post_view(
-                    mode=LikeMode.SINGLE_CLICK, skip_media_check=True
-                )
+                # Reels, videos and IGTV. The recursive SINGLE_CLICK call that
+                # used to be here passed skip_media_check=True and therefore
+                # returned without pressing anything, so these were never liked.
+                like_button = self._get_like_button_of(media)
+                if like_button is not None:
+                    logger.info("Clicking on the little heart ❤️.")
+                    like_button.click()
+                else:
+                    logger.debug("Like button not found on this screen, skip like.")
         elif mode == LikeMode.SINGLE_CLICK:
             like_button = self._get_like_button_of(media)
             if like_button is None:
@@ -1401,6 +1456,10 @@ class PostsViewList:
         logger.debug("Check if like succeeded in post view.")
         bnt_like_obj = self.device.find(
             resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
+        )
+        logger.debug(
+            f"[likedbg] verify: hearts={bnt_like_obj.count_items()} "
+            f"attempts_left={attempts}"
         )
         if bnt_like_obj.exists():
             STR = "Liked"
