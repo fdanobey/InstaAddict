@@ -40,8 +40,9 @@ def _make_view(backs_needed):
 
 
 def _navigate(view):
-    with patch.object(views.UniversalActions, "close_keyboard"), patch.object(
-        views, "random_sleep"
+    with (
+        patch.object(views.UniversalActions, "close_keyboard"),
+        patch.object(views, "random_sleep"),
     ):
         view._navigateTo(TabBarTabs.HOME)
 
