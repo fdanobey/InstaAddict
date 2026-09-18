@@ -1226,8 +1226,18 @@ class PostsViewList:
 
     def _get_media_container(self):
         media = self.device.find(resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP)
-        content_desc = media.get_desc() if media.exists() else None
-        return media, content_desc
+        if not media.exists():
+            return media, None
+        content_desc = media.get_desc()
+        if not content_desc:
+            # IG 447+: описание переехало из media_group во вложенный image view
+            inner = media.child(
+                resourceIdMatches=(
+                    f"{ResourceID.ROW_FEED_PHOTO_IMAGEVIEW}|{ResourceID.CAROUSEL_IMAGE}"
+                )
+            )
+            content_desc = inner.get_desc() if inner.exists() else None
+        return media, content_desc or None
 
     @staticmethod
     def detect_media_type(content_desc) -> Tuple[Optional[MediaType], Optional[int]]:
@@ -1288,6 +1298,7 @@ class PostsViewList:
             return
         media, content_desc = self._get_media_container()
         if content_desc is None:
+            logger.debug("Media container has no description, skip like.")
             return
         if not already_watched:
             media_type, _ = post_view_list.detect_media_type(content_desc)
