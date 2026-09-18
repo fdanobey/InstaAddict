@@ -1254,6 +1254,12 @@ class PostsViewList:
                 "That media is missing content description, so I don't know which kind of video it is."
             )
             media_type = MediaType.UNKNOWN
+        elif carousel_match := re.match(
+            r"^(?:Photo|Video)\s+\d+\s+of\s+(\d+)", content_desc, re.IGNORECASE
+        ):
+            obj_count = int(carousel_match.group(1))
+            logger.info(f"It's a carousel with {obj_count} element(s).")
+            media_type = MediaType.CAROUSEL
         elif re.match(r"^Photo|^Hidden Photo", content_desc, re.IGNORECASE):
             logger.info("It's a photo.")
             media_type = MediaType.PHOTO
