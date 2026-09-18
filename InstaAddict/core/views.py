@@ -143,6 +143,12 @@ class TabBarView:
         logger.debug(f"Navigate to {tab_name}")
         button = None
         UniversalActions.close_keyboard(self.device)
+        for _ in range(5):
+            if self.is_tab_bar_visible():
+                break
+            logger.debug("Tab bar not visible, go back.")
+            self.device.back()
+            random_sleep(1, 2, modulable=False)
         if tab == TabBarTabs.HOME:
             button = self.device.find(
                 classNameMatches=ClassName.BUTTON_OR_FRAME_LAYOUT_REGEX,
