@@ -1355,7 +1355,7 @@ class PostsViewList:
         logger.info("Open comments of post.")
         self.device.find(resourceIdMatches=ResourceID.ROW_FEED_BUTTON_COMMENT).click()
 
-    def _check_if_liked(self):
+    def _check_if_liked(self, attempts: int = 3):
         logger.debug("Check if like succeeded in post view.")
         bnt_like_obj = self.device.find(
             resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
@@ -1368,11 +1368,14 @@ class PostsViewList:
             else:
                 logger.debug("Like is not present.")
                 return False
-        else:
-            UniversalActions(self.device)._swipe_points(
-                direction=Direction.DOWN, delta_y=100
-            )
-            return PostsViewList(self.device)._check_if_liked()
+        if attempts <= 0:
+            # e.g. the clips viewer, which has no row_feed_button_like at all
+            logger.debug("No like button on this screen, give up scrolling for it.")
+            return False
+        UniversalActions(self.device)._swipe_points(
+            direction=Direction.DOWN, delta_y=100
+        )
+        return PostsViewList(self.device)._check_if_liked(attempts - 1)
 
     def _check_if_ad_or_hashtag(
         self, post_owner_obj
