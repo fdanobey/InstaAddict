@@ -1243,20 +1243,58 @@ class PostsViewList:
             resourceIdMatches=ResourceID.ROW_FEED_PHOTO_PROFILE_NAME
         ).get_text()
 
+    def _describes_a_post(self, media):
+        """IG 447+ moved the description from media_group to its inner image view."""
+        content_desc = media.get_desc()
+        if content_desc:
+            return content_desc
+        inner = media.child(
+            resourceIdMatches=(
+                f"{ResourceID.ROW_FEED_PHOTO_IMAGEVIEW}|{ResourceID.CAROUSEL_IMAGE}"
+            )
+        )
+        return inner.get_desc() if inner.exists() else None
+
     def _get_media_container(self):
         media = self.device.find(resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP)
         if not media.exists():
             return media, None
-        content_desc = media.get_desc()
-        if not content_desc:
-            # IG 447+: the description moved from media_group to its inner image view
-            inner = media.child(
-                resourceIdMatches=(
-                    f"{ResourceID.ROW_FEED_PHOTO_IMAGEVIEW}|{ResourceID.CAROUSEL_IMAGE}"
-                )
+        # The feed keeps thin slivers of already scrolled posts at the top and the
+        # bottom of the list. They match the same ids but describe nothing, and
+        # being first in the tree they used to win, which sent the double tap into
+        # the header. Take the first match that actually describes a post.
+        for index in range(media.count_items()):
+            candidate = self.device.find(
+                resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP, index=index
             )
-            content_desc = inner.get_desc() if inner.exists() else None
-        return media, content_desc or None
+            content_desc = self._describes_a_post(candidate)
+            if content_desc:
+                return candidate, content_desc
+        return media, None
+
+    def _get_like_button_of(self, media):
+        """A feed post is not one container: its media and its buttons row are flat
+        siblings of the list. Pair them by geometry - the buttons row starts where
+        the media ends - so the heart pressed belongs to the post interacted with."""
+        buttons = self.device.find(resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE)
+        if not buttons.exists():
+            return None
+        try:
+            media_bottom = media.get_bounds()["bottom"] if media is not None else 0
+        except DeviceFacade.JsonRpcError:
+            media_bottom = 0
+        best = None
+        for index in range(buttons.count_items()):
+            candidate = self.device.find(
+                resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE, index=index
+            )
+            try:
+                top = candidate.get_bounds()["top"]
+            except DeviceFacade.JsonRpcError:
+                continue
+            if top >= media_bottom and (best is None or top < best[0]):
+                best = (top, candidate)
+        return best[1] if best else None
 
     @staticmethod
     def detect_media_type(content_desc) -> Tuple[Optional[MediaType], Optional[int]]:
@@ -1340,12 +1378,16 @@ class PostsViewList:
                     mode=LikeMode.SINGLE_CLICK, skip_media_check=True
                 )
         elif mode == LikeMode.SINGLE_CLICK:
-            like_button_exists, _ = self._find_likers_container()
-            if like_button_exists:
+            like_button = self._get_like_button_of(media)
+            if like_button is None:
+                # the heart may still be below the fold; this scrolls it into view
+                self._find_likers_container()
+                like_button = self._get_like_button_of(media)
+            if like_button is not None:
                 logger.info("Clicking on the little heart ❤️.")
-                self.device.find(
-                    resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
-                ).click()
+                like_button.click()
+            else:
+                logger.debug("Like button not found on this screen, skip like.")
 
     def _follow_in_post_view(self):
         logger.info("Follow blogger in place.")
