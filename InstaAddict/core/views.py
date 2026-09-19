@@ -143,6 +143,12 @@ class TabBarView:
         logger.debug(f"Navigate to {tab_name}")
         button = None
         UniversalActions.close_keyboard(self.device)
+        for _ in range(5):
+            if self.is_tab_bar_visible():
+                break
+            logger.debug("Tab bar not visible, go back.")
+            self.device.back()
+            random_sleep(1, 2, modulable=False)
         if tab == TabBarTabs.HOME:
             button = self.device.find(
                 classNameMatches=ClassName.BUTTON_OR_FRAME_LAYOUT_REGEX,
@@ -1237,10 +1243,58 @@ class PostsViewList:
             resourceIdMatches=ResourceID.ROW_FEED_PHOTO_PROFILE_NAME
         ).get_text()
 
+    def _describes_a_post(self, media):
+        """IG 447+ moved the description from media_group to its inner image view."""
+        content_desc = media.get_desc()
+        if content_desc:
+            return content_desc
+        inner = media.child(
+            resourceIdMatches=(
+                f"{ResourceID.ROW_FEED_PHOTO_IMAGEVIEW}|{ResourceID.CAROUSEL_IMAGE}"
+            )
+        )
+        return inner.get_desc() if inner.exists() else None
+
     def _get_media_container(self):
         media = self.device.find(resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP)
-        content_desc = media.get_desc() if media.exists() else None
-        return media, content_desc
+        if not media.exists():
+            return media, None
+        # The feed keeps thin slivers of already scrolled posts at the top and the
+        # bottom of the list. They match the same ids but describe nothing, and
+        # being first in the tree they used to win, which sent the double tap into
+        # the header. Take the first match that actually describes a post.
+        for index in range(media.count_items()):
+            candidate = self.device.find(
+                resourceIdMatches=ResourceID.CAROUSEL_AND_MEDIA_GROUP, index=index
+            )
+            content_desc = self._describes_a_post(candidate)
+            if content_desc:
+                return candidate, content_desc
+        return media, None
+
+    def _get_like_button_of(self, media):
+        """A feed post is not one container: its media and its buttons row are flat
+        siblings of the list. Pair them by geometry - the buttons row starts where
+        the media ends - so the heart pressed belongs to the post interacted with."""
+        buttons = self.device.find(resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE)
+        if not buttons.exists():
+            return None
+        try:
+            media_bottom = media.get_bounds()["bottom"] if media is not None else 0
+        except DeviceFacade.JsonRpcError:
+            media_bottom = 0
+        best = None
+        for index in range(buttons.count_items()):
+            candidate = self.device.find(
+                resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE, index=index
+            )
+            try:
+                top = candidate.get_bounds()["top"]
+            except DeviceFacade.JsonRpcError:
+                continue
+            if top >= media_bottom and (best is None or top < best[0]):
+                best = (top, candidate)
+        return best[1] if best else None
 
     @staticmethod
     def detect_media_type(content_desc) -> Tuple[Optional[MediaType], Optional[int]]:
@@ -1257,6 +1311,12 @@ class PostsViewList:
                 "That media is missing content description, so I don't know which kind of video it is."
             )
             media_type = MediaType.UNKNOWN
+        elif carousel_match := re.match(
+            r"^(?:Photo|Video)\s+\d+\s+of\s+(\d+)", content_desc, re.IGNORECASE
+        ):
+            obj_count = int(carousel_match.group(1))
+            logger.info(f"It's a carousel with {obj_count} element(s).")
+            media_type = MediaType.CAROUSEL
         elif re.match(r"^Photo|^Hidden Photo", content_desc, re.IGNORECASE):
             logger.info("It's a photo.")
             media_type = MediaType.PHOTO
@@ -1300,29 +1360,57 @@ class PostsViewList:
         if skip_media_check:
             return
         media, content_desc = self._get_media_container()
+        media_type = None
         if content_desc is None:
-            return
-        if not already_watched:
+            if mode == LikeMode.DOUBLE_CLICK:
+                logger.debug("Media container has no description, skip like.")
+                return
+            # A single click only needs the media to pair the heart with its post,
+            # and by the time the retry runs the feed has usually scrolled. Bailing
+            # out here is what stopped the retry from ever pressing anything.
+            logger.debug(
+                "Media container has no description, pressing the heart anyway."
+            )
+        elif not already_watched:
             media_type, _ = post_view_list.detect_media_type(content_desc)
             opened_post_view.watch_media(media_type)
         if mode == LikeMode.DOUBLE_CLICK:
             if media_type in (MediaType.CAROUSEL, MediaType.PHOTO):
-                logger.info("Double click on post.")
-                _, _, action_bar_bottom = PostsViewList(
-                    self.device
-                )._get_action_bar_position()
-                media.double_click(obj_over=action_bar_bottom)
+                # Pressing the heart is the reliable path on IG 447: in one run
+                # double tapping the media registered 1 like out of 9 attempts,
+                # while the button toggles content-desc Like <-> Liked every time.
+                # Keep the double tap for layouts where no heart can be paired.
+                like_button = self._get_like_button_of(media)
+                if like_button is not None:
+                    logger.info("Clicking on the little heart ❤️.")
+                    like_button.click()
+                else:
+                    logger.info("Double click on post.")
+                    _, _, action_bar_bottom = PostsViewList(
+                        self.device
+                    )._get_action_bar_position()
+                    media.double_click(obj_over=action_bar_bottom)
             else:
-                self._like_in_post_view(
-                    mode=LikeMode.SINGLE_CLICK, skip_media_check=True
-                )
+                # Reels, videos and IGTV. The recursive SINGLE_CLICK call that
+                # used to be here passed skip_media_check=True and therefore
+                # returned without pressing anything, so these were never liked.
+                like_button = self._get_like_button_of(media)
+                if like_button is not None:
+                    logger.info("Clicking on the little heart ❤️.")
+                    like_button.click()
+                else:
+                    logger.debug("Like button not found on this screen, skip like.")
         elif mode == LikeMode.SINGLE_CLICK:
-            like_button_exists, _ = self._find_likers_container()
-            if like_button_exists:
+            like_button = self._get_like_button_of(media)
+            if like_button is None:
+                # the heart may still be below the fold; this scrolls it into view
+                self._find_likers_container()
+                like_button = self._get_like_button_of(media)
+            if like_button is not None:
                 logger.info("Clicking on the little heart ❤️.")
-                self.device.find(
-                    resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
-                ).click()
+                like_button.click()
+            else:
+                logger.debug("Like button not found on this screen, skip like.")
 
     def _follow_in_post_view(self):
         logger.info("Follow blogger in place.")
@@ -1332,7 +1420,7 @@ class PostsViewList:
         logger.info("Open comments of post.")
         self.device.find(resourceIdMatches=ResourceID.ROW_FEED_BUTTON_COMMENT).click()
 
-    def _check_if_liked(self):
+    def _check_if_liked(self, attempts: int = 3):
         logger.debug("Check if like succeeded in post view.")
         bnt_like_obj = self.device.find(
             resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
@@ -1345,11 +1433,14 @@ class PostsViewList:
             else:
                 logger.debug("Like is not present.")
                 return False
-        else:
-            UniversalActions(self.device)._swipe_points(
-                direction=Direction.DOWN, delta_y=100
-            )
-            return PostsViewList(self.device)._check_if_liked()
+        if attempts <= 0:
+            # e.g. the clips viewer, which has no row_feed_button_like at all
+            logger.debug("No like button on this screen, give up scrolling for it.")
+            return False
+        UniversalActions(self.device)._swipe_points(
+            direction=Direction.DOWN, delta_y=100
+        )
+        return PostsViewList(self.device)._check_if_liked(attempts - 1)
 
     def _check_if_ad_or_hashtag(
         self, post_owner_obj
