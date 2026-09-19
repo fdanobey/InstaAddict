@@ -298,7 +298,11 @@ def interact_with_user(
                         like_succeed = opened_post_view.like_video()
                         logger.debug("Closing video...")
                         device.back()
-                elif media_type in (MediaType.CAROUSEL, MediaType.PHOTO, MediaType.UNKNOWN):
+                elif media_type in (
+                    MediaType.CAROUSEL,
+                    MediaType.PHOTO,
+                    MediaType.UNKNOWN,
+                ):
                     if media_type == MediaType.CAROUSEL:
                         _browse_carousel(device, obj_count)
                     opened_post_view.watch_media(media_type)
@@ -625,7 +629,10 @@ def _comment(
             resourceIdMatches=ResourceID.MEDIA_CONTAINER,
         )
         if tab_bar.exists() and media.exists():
-            if int(tab_bar.get_bounds()["top"]) - int(media.get_bounds()["bottom"]) < 150:
+            if (
+                int(tab_bar.get_bounds()["top"]) - int(media.get_bounds()["bottom"])
+                < 150
+            ):
                 universal_actions._swipe_points(
                     direction=Direction.DOWN, delta_y=randint(150, 250)
                 )
@@ -651,7 +658,9 @@ def _comment(
                         enabled="true",
                     )
                 if not comment_box.exists():
-                    any_edittext = device.find(classNameMatches=".*EditText.*|.*AutoCompleteTextView.*")
+                    any_edittext = device.find(
+                        classNameMatches=".*EditText.*|.*AutoCompleteTextView.*"
+                    )
                     if any_edittext.exists():
                         logger.debug(
                             f"[DEBUG comment box] found an EditText-like widget but the selector missed it. Bounds: {any_edittext.get_bounds()}"
@@ -685,11 +694,15 @@ def _comment(
                         )
                     if not post_button.exists():
                         # Fallback: try to find button by content-desc "Post" or "Send"
-                        post_button = device.find(descriptionMatches="(?i)^(Post|Send)$")
+                        post_button = device.find(
+                            descriptionMatches="(?i)^(Post|Send)$"
+                        )
                     if post_button.exists():
                         post_button.click()
                     else:
-                        logger.warning("Post button not found, skipping comment submission")
+                        logger.warning(
+                            "Post button not found, skipping comment submission"
+                        )
                         universal_actions.close_keyboard(device)
                         device.back()
                         return False
@@ -703,9 +716,7 @@ def _comment(
                 universal_actions.close_keyboard(device)
                 # Verify comment was posted by checking for "{username} said {comment}" pattern in content-desc
                 # This is the reliable signal based on UI hierarchy analysis
-                posted_text = device.find(
-                    description=f"{my_username} said {comment}"
-                )
+                posted_text = device.find(description=f"{my_username} said {comment}")
                 if posted_text.exists(Timeout.MEDIUM):
                     logger.info("Comment succeed.", extra={"color": f"{Fore.GREEN}"})
                     session_state.totalComments += 1
@@ -728,6 +739,7 @@ def _comment(
                     direction=Direction.DOWN, delta_y=randint(150, 250)
                 )
     return False
+
 
 def _send_PM(
     device,
@@ -1024,7 +1036,9 @@ def _watch_stories(
                 resourceId=ResourceID.TOUCH_INTERCEPTOR_EXPANDED_PROFILE_PIC
             )
             if expanded_profile_pic.exists():
-                logger.debug("Profile picture preview opened instead of story. Dismissing.")
+                logger.debug(
+                    "Profile picture preview opened instead of story. Dismissing."
+                )
                 device.back()
                 return 0
             story_view = CurrentStoryView(device)
