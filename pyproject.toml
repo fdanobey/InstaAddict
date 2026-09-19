@@ -40,3 +40,7 @@ Source = "https://github.com/joeahkim/InstaAddict"
 
 [project.scripts]
 instaaddict = "InstaAddict.__main__:main"
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]

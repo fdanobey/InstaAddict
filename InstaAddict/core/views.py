@@ -511,7 +511,10 @@ class PostsViewList:
                         break
                 else:
                     media_bounds = self._get_current_media_bounds(containers_content)
-                    if media_bounds and gap_view_obj.get_bounds()["bottom"] < media_bounds["bottom"]:
+                    if (
+                        media_bounds
+                        and gap_view_obj.get_bounds()["bottom"] < media_bounds["bottom"]
+                    ):
                         PostsViewList(self.device).swipe_to_fit_posts(
                             SwipeTo.HALF_PHOTO
                         )
@@ -658,7 +661,9 @@ class PostsViewList:
         visible_candidates = [
             item
             for item in media_candidates
-            if 0 <= (item["bounds"]["top"] + item["bounds"]["bottom"]) / 2 <= display_height
+            if 0
+            <= (item["bounds"]["top"] + item["bounds"]["bottom"]) / 2
+            <= display_height
         ]
         if not visible_candidates:
             visible_candidates = media_candidates
@@ -703,8 +708,12 @@ class PostsViewList:
                 if media_bounds is not None:
                     logger.debug("Using compatibility media bounds.")
 
-            if media_count > 1 and media_bounds and (
-                media_bounds["bottom"] < self.device.get_info()["displayHeight"] / 3
+            if (
+                media_count > 1
+                and media_bounds
+                and (
+                    media_bounds["bottom"] < self.device.get_info()["displayHeight"] / 3
+                )
             ):
                 universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                 continue
@@ -720,7 +729,10 @@ class PostsViewList:
                 else:
                     universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                     continue
-            elif media_bounds and media_bounds["bottom"] > likes_view.get_bounds()["bottom"]:
+            elif (
+                media_bounds
+                and media_bounds["bottom"] > likes_view.get_bounds()["bottom"]
+            ):
                 universal_actions._swipe_points(Direction.DOWN, delta_y=100)
                 continue
             logger.debug("Likers container exists!")
@@ -913,7 +925,10 @@ class PostsViewList:
         for child in node.iter("node"):
             if child is node:
                 continue
-            if PostsViewList._normalize_ig_text(child.attrib.get("content-desc")) == username:
+            if (
+                PostsViewList._normalize_ig_text(child.attrib.get("content-desc"))
+                == username
+            ):
                 return True
         return False
 
@@ -1021,7 +1036,11 @@ class PostsViewList:
             if not has_media:
                 continue
             for caption in captions:
-                if header["bounds"]["top"] <= caption["bounds"]["top"] < next_header_top:
+                if (
+                    header["bounds"]["top"]
+                    <= caption["bounds"]["top"]
+                    < next_header_top
+                ):
                     logger.debug("Description found in current post hierarchy.")
                     return caption["text"]
         return None
@@ -2458,6 +2477,7 @@ class FollowingView:
         logger.error(f"Cannot confirm unfollow for {username}.")
         save_crash(self.device)
         return False
+
 
 class FollowersView:
     def __init__(self, device: DeviceFacade):
