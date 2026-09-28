@@ -1,5 +1,6 @@
 import logging
 import string
+import time
 from datetime import datetime
 from enum import Enum, auto
 from inspect import stack
@@ -81,9 +82,13 @@ class Mode(Enum):
 
 
 class DeviceFacade:
+    IG_OPEN_CHECK_TTL = 30.0
+
     def __init__(self, device_id, app_id):
         self.device_id = device_id
         self.app_id = app_id
+        self._last_ig_open_check = 0.0
+        self._last_ig_open_result = False
         try:
             if device_id is None or "." not in device_id:
                 self.deviceV2 = uiautomator2.connect(
@@ -101,7 +106,17 @@ class DeviceFacade:
             raise DeviceFacade.JsonRpcError(e)
 
     def _ig_is_opened(self) -> bool:
-        return self._get_current_app() == self.app_id
+        # app_current() can take several seconds on some devices: its fast
+        # mCurrentFocus regex no longer matches and it falls back to a slow
+        # `dumpsys activity top` call. find() runs this check on every UI
+        # lookup, so cache the result for a short time. A closed/crashed
+        # app is still detected within the TTL, without paying the heavy
+        # call on each selector.
+        now = time.monotonic()
+        if now - self._last_ig_open_check > self.IG_OPEN_CHECK_TTL:
+            self._last_ig_open_result = self._get_current_app() == self.app_id
+            self._last_ig_open_check = now
+        return self._last_ig_open_result
 
     def check_if_ig_is_opened(func):
         def wrapper(self, **kwargs):
