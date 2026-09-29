@@ -246,7 +246,7 @@ class HashTagView:
 
     def _getFistImageView(self, recycler):
         obj = recycler.child(
-            resourceIdMatches=ResourceID.IMAGE_BUTTON,
+            resourceIdMatches=f"{ResourceID.IMAGE_BUTTON}|{ResourceID.IMAGE_PREVIEW}",
         )
         if obj.exists(Timeout.LONG):
             logger.debug("First image in view exists.")
@@ -284,7 +284,7 @@ class PlacesView:
 
     def _getFistImageView(self, recycler):
         obj = recycler.child(
-            resourceIdMatches=ResourceID.IMAGE_BUTTON,
+            resourceIdMatches=f"{ResourceID.IMAGE_BUTTON}|{ResourceID.IMAGE_PREVIEW}",
         )
         if obj.exists(Timeout.LONG):
             logger.debug("First image in view exists.")
@@ -357,12 +357,31 @@ class SearchView:
             Timeout.ZERO
         )
 
-    def _isOnSerpPage(self) -> bool:
+    def _isOnHashtagDestinationGrid(self) -> bool:
+        """New Instagram layout: hashtag rows (top view and Tags tab) open a
+        SERP-like 'journey' page whose 'For you' tab IS the hashtag destination,
+        showing a media grid (image_button/image_preview cards) under the SERP
+        chrome. The classic hashtag page is gone."""
+        return self.device.find(
+            resourceId=ResourceID.IMAGE_BUTTON,
+            className=ClassName.IMAGE_VIEW,
+        ).exists(Timeout.SHORT) or self.device.find(
+            resourceId=ResourceID.IMAGE_PREVIEW,
+            className=ClassName.IMAGE_VIEW,
+        ).exists(
+            Timeout.ZERO
+        )
+
+    def _isOnSerpPage(self, job: str = "") -> bool:
         # If the profile actually opened, we are not on a SERP page. Check
         # this first so the scroll-based recheck below never runs on a real
         # profile (only subtitle-located accounts, whose row click opens the
         # SERP overview, ever reach the scroll).
         if self._isOnProfileHeader():
+            return False
+        # Media grid visible means we are on the hashtag destination grid,
+        # not on a search overview page.
+        if "hashtag" in job and self._isOnHashtagDestinationGrid():
             return False
         if self._serpMarkersVisible(Timeout.SHORT):
             return True
@@ -453,22 +472,32 @@ class SearchView:
             for attempt in range(2):
                 try:
                     row.click()
-                except DeviceFacade.JsonRpcError:
-                    logger.warning(f"Failed to click result row for {target}.")
+                except DeviceFacade.JsonRpcError as e:
+                    # New layout: after a successful hashtag row click the app
+                    # bounces to the 'For you' destination grid and the row
+                    # disappears, so a re-click can raise 'not found'. Check
+                    # where we are before giving up.
+                    if is_hashtag and self._isOnHashtagDestinationGrid():
+                        logger.debug(
+                            "Result row gone but hashtag destination grid is "
+                            "visible; navigation already succeeded."
+                        )
+                        return True
+                    logger.warning(f"Failed to click result row for {target}: {e}")
                     return False
                 if is_hashtag:
-                    if not self._isOnSerpPage():
+                    if not self._isOnSerpPage(job):
                         return True
                 elif self._isOnProfileHeader():
                     return True
-                if self._isOnSerpPage():
+                if self._isOnSerpPage(job):
                     logger.debug("Still on SERP after row click; retrying row click.")
                     continue
-                # neither SERP nor profile header: give it one more check
-                if is_hashtag or self._isOnProfileHeader():
-                    return True
+            # neither SERP nor profile header: give it one more check
+            if is_hashtag or self._isOnProfileHeader():
+                return True
             return (self._isOnProfileHeader() if is_hashtag else True) and (
-                not self._isOnSerpPage()
+                not self._isOnSerpPage(job)
             )
         logger.warning(f"{target} not found on SERP {chip_label} tab.")
         return False
@@ -568,7 +597,7 @@ class SearchView:
 
         if self._check_current_view(target, job):
             logger.info(f"{target} is in recent history.")
-            if self._isOnSerpPage():
+            if self._isOnSerpPage(job):
                 return self._openTargetFromSerp(target, job)
             return True
 
@@ -594,7 +623,7 @@ class SearchView:
                 return False
         if self._check_current_view(target, job):
             logger.info(f"{target} is in top view.")
-            if self._isOnSerpPage():
+            if self._isOnSerpPage(job):
                 return self._openTargetFromSerp(target, job)
             return True
         echo_text = self.device.find(resourceId=ResourceID.ECHO_TEXT)
@@ -604,7 +633,7 @@ class SearchView:
             # at this point we have the tabs available
             self._switch_to_target_tag(job)
             if self._check_current_view(target, job, in_place_tab=True):
-                if self._isOnSerpPage():
+                if self._isOnSerpPage(job):
                     return self._openTargetFromSerp(target, job)
                 return True
         logger.warning(f"{target} not found in search results; skipping.")

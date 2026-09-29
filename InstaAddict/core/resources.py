@@ -60,6 +60,7 @@ class ResourceID:
         )
         self.IGLIVE_REEL_LAYOUT = f"{APP_ID}:id/iglive_reel_layout"
         self.IMAGE_BUTTON = f"{APP_ID}:id/image_button"
+        self.IMAGE_PREVIEW = f"{APP_ID}:id/image_preview"
         self.INDICATOR = f"{APP_ID}:id/indicator"
         self.LANGUAGE_LIST_LOCALE = f"{APP_ID}:id/language_locale_list"
         self.LAYOUT_COMMENT_THREAD_EDITTEXT = (
