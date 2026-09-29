@@ -91,6 +91,10 @@ class Mode(Enum):
 
 class DeviceFacade:
     IG_OPEN_CHECK_TTL = 30.0
+    # How long to wait before re-checking the foreground app after a
+    # not-open reading, so a transient window-manager misread during a
+    # fullscreen transition (stories/reels) does not kill the session.
+    APP_OPEN_RECHECK_DELAY = 2.0
 
     def __init__(self, device_id, app_id):
         self.device_id = device_id
@@ -143,8 +147,16 @@ class DeviceFacade:
             avoid_lst = ["choose_cloned_app", "check_if_crash_popup_is_there"]
             caller = stack()[1].function
             if not self._ig_is_opened() and caller not in avoid_lst:
-                self._last_ig_open_check = float("-inf")
-                raise DeviceFacade.AppHasCrashed("App has crashed / has been closed!")
+                # app_current() can transiently report a different package
+                # while a fullscreen view (stories/reels viewer) is settling.
+                # Re-check after a short wait and only treat it as a crash
+                # when the app is still not in the foreground.
+                sleep(DeviceFacade.APP_OPEN_RECHECK_DELAY)
+                if not self._ig_is_opened():
+                    self._last_ig_open_check = float("-inf")
+                    raise DeviceFacade.AppHasCrashed(
+                        "App has crashed / has been closed!"
+                    )
             return func(self, **kwargs)
 
         return wrapper
