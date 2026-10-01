@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from enum import Enum, auto
 from inspect import stack
+from math import isfinite
 from os import getcwd, listdir
 from random import randint, uniform
 from re import search
@@ -16,6 +17,13 @@ import uiautomator2
 from InstaAddict.core.utils import random_sleep
 
 logger = logging.getLogger(__name__)
+
+args = None
+
+
+def load_config(config):
+    global args
+    args = config.args
 
 
 def create_device(device_id, app_id):
@@ -87,7 +95,7 @@ class DeviceFacade:
     def __init__(self, device_id, app_id):
         self.device_id = device_id
         self.app_id = app_id
-        self._last_ig_open_check = 0.0
+        self._last_ig_open_check = float("-inf")
         self._last_ig_open_result = False
         try:
             if device_id is None or "." not in device_id:
@@ -98,6 +106,15 @@ class DeviceFacade:
                 self.deviceV2 = uiautomator2.connect_adb_wifi(f"{device_id}")
         except ImportError:
             raise ImportError("Please install uiautomator2: pip3 install uiautomator2")
+
+    def _ig_open_check_ttl(self) -> float:
+        try:
+            scale = float(args.timeout_scale) if args is not None else 1.0
+        except (AttributeError, TypeError, ValueError):
+            scale = 1.0
+        if not isfinite(scale) or scale <= 0:
+            scale = 1.0
+        return self.IG_OPEN_CHECK_TTL / scale
 
     def _get_current_app(self):
         try:
@@ -113,7 +130,10 @@ class DeviceFacade:
         # app is still detected within the TTL, without paying the heavy
         # call on each selector.
         now = time.monotonic()
-        if now - self._last_ig_open_check > self.IG_OPEN_CHECK_TTL:
+        if (
+            not self._last_ig_open_result
+            or now - self._last_ig_open_check >= self._ig_open_check_ttl()
+        ):
             self._last_ig_open_result = self._get_current_app() == self.app_id
             self._last_ig_open_check = now
         return self._last_ig_open_result
@@ -123,6 +143,7 @@ class DeviceFacade:
             avoid_lst = ["choose_cloned_app", "check_if_crash_popup_is_there"]
             caller = stack()[1].function
             if not self._ig_is_opened() and caller not in avoid_lst:
+                self._last_ig_open_check = float("-inf")
                 raise DeviceFacade.AppHasCrashed("App has crashed / has been closed!")
             return func(self, **kwargs)
 
