@@ -81,10 +81,12 @@ class Mode(Enum):
 
 
 class DeviceFacade:
-    # How long to wait before re-checking the foreground app after a
-    # not-open reading, so a transient window-manager misread during a
-    # fullscreen transition (stories/reels) does not kill the session.
-    APP_OPEN_RECHECK_DELAY = 2.0
+    # How long to wait between foreground-app re-checks after a not-open
+    # reading, and how many times to re-check, so a transient window-manager
+    # misread during a fullscreen transition (stories/reels) does not kill
+    # the session. A real crash/close persists across all re-checks.
+    APP_OPEN_RECHECK_DELAY = 1.0
+    APP_OPEN_RECHECK_ATTEMPTS = 3
 
     def __init__(self, device_id, app_id):
         self.device_id = device_id
@@ -112,13 +114,38 @@ class DeviceFacade:
         def wrapper(self, **kwargs):
             avoid_lst = ["choose_cloned_app", "check_if_crash_popup_is_there"]
             caller = stack()[1].function
-            if not self._ig_is_opened() and caller not in avoid_lst:
+            # The first reading can also fail while the uiautomator stub is
+            # restarting; treat that as not-open so it enters the re-check
+            # loop below instead of escaping as an unhandled JsonRpcError.
+            try:
+                ig_opened = self._ig_is_opened()
+            except DeviceFacade.JsonRpcError:
+                ig_opened = False
+            if not ig_opened and caller not in avoid_lst:
                 # app_current() can transiently report a different package
-                # while a fullscreen view (stories/reels viewer) is settling.
-                # Re-check after a short wait and only treat it as a crash
-                # when the app is still not in the foreground.
-                sleep(DeviceFacade.APP_OPEN_RECHECK_DELAY)
-                if not self._ig_is_opened():
+                # while a fullscreen view (stories/reels viewer) is settling,
+                # and it can briefly fail (JsonRpcError) while the uiautomator
+                # stub is restarting itself. Re-check a few times and only treat
+                # it as a crash when Instagram is still not in the foreground
+                # after the last attempt.
+                current_app = None
+                for attempt in range(DeviceFacade.APP_OPEN_RECHECK_ATTEMPTS):
+                    sleep(DeviceFacade.APP_OPEN_RECHECK_DELAY)
+                    try:
+                        current_app = self._get_current_app()
+                    except DeviceFacade.JsonRpcError:
+                        continue
+                    if current_app == self.app_id:
+                        logger.debug(
+                            "Foreground re-check recovered after a transient"
+                            f" flip on attempt {attempt + 1}; Instagram is still open."
+                        )
+                        break
+                else:
+                    logger.debug(
+                        f"Foreground app is '{current_app}', expected '{self.app_id}' "
+                        f"after {DeviceFacade.APP_OPEN_RECHECK_ATTEMPTS} re-checks."
+                    )
                     raise DeviceFacade.AppHasCrashed(
                         "App has crashed / has been closed!"
                     )
