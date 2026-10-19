@@ -188,7 +188,7 @@ class CoreArguments(Plugin):
             {
                 "arg": "--timeout-scale",
                 "nargs": None,
-                "help": "divides the foreground-app check cache TTL (>1 checks more often, <1 less often)",
+                "help": "divides UI wait timeouts and the foreground-app check cache TTL (>1 speeds up waits and checks more often, <1 slows down)",
                 "metavar": 1,
                 "default": 1,
             },
