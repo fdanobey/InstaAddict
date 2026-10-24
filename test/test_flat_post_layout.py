@@ -147,8 +147,9 @@ def test_grid_cell_desc_falls_back_to_inner_image_button():
     row = FakeView()
     row.child = lambda **kw: cell if "index" in kw else FakeView(exists=False)
     post_list = FakeView()
+    # since the grid-offset fix, row 0 is list child 0 (no +1 skip)
     post_list.child = lambda **kw: (
-        row if kw.get("index") == 1 else FakeView(exists=False)
+        row if kw.get("index") == 0 else FakeView(exists=False)
     )
     post_list.wait = lambda *a, **kw: None
 
