@@ -715,7 +715,6 @@ def check_and_report_restricted_list(device, session_state, target_username):
     )
     if not no_results_heading.exists() and not restricted_text.exists():
         return False
-
     logger.warning(
         f"@{target_username}'s followers/following list is restricted by Instagram.",
         extra={"color": f"{Fore.RED}"},
@@ -786,6 +785,25 @@ def iterate_over_followers(
                 logger.warning(
                     f"Instagram restricted the list for @{target}. Skipping this account.",
                     extra={"color": f"{Fore.RED}"},
+                )
+                logger.info("Back to blogger profile")
+                device.back()
+                random_sleep(1, 2, modulable=False)
+                device.back()
+                device.back()
+                return
+            private_notice = device.find(
+                className=ClassName.TEXT_VIEW,
+                textMatches=case_insensitive_re(
+                ["This account is private", "This profile is private"]
+                ),
+            )
+            if private_notice.exists():
+                logger.warning(
+                f"@{target} is a private account and its "
+                f"{'followers' if current_job.endswith('followers') else 'following'} "
+                "can't be viewed. Skipping this account.",
+                extra={"color": f"{Fore.RED}"},
                 )
                 logger.info("Back to blogger profile")
                 device.back()

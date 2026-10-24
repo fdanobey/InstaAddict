@@ -2554,7 +2554,17 @@ class ProfileView(ActionBarView):
                 ]
             )
         )
-        return private_profile_view.exists()
+        if private_profile_view.exists():
+            return True
+        # Newer Instagram builds render the notice as a plain TextView with no
+        # dedicated resource-id, so fall back to matching the notice text itself.
+        private_notice_text = self.device.find(
+            className=ClassName.TEXT_VIEW,
+            textMatches=case_insensitive_re(
+                ["This account is private", "This profile is private"]
+            ),
+        )
+        return private_notice_text.exists()
 
     def StoryRing(self) -> DeviceFacade.View:
         return self.device.find(
