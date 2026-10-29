@@ -959,7 +959,9 @@ class PostsViewList:
     def _find_likers_container(self):
         universal_actions = UniversalActions(self.device)
         # Reels: no feed-style likers container, skip the swipe loop
-        if self.device.find(resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME).exists():
+        if self.device.find(
+            resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
+        ).exists():
             logger.debug("Reels layout: skipping likers container lookup.")
             return False, 0
         logger.debug("Entering feed-style likers container swipe loop.")
@@ -1437,7 +1439,9 @@ class PostsViewList:
                     resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
                 )
                 if clips_author.exists():
-                    logger.debug("Reels layout: no caption found, skipping duplicate check.")
+                    logger.debug(
+                        "Reels layout: no caption found, skipping duplicate check."
+                    )
                     return False, "", username, is_ad, is_hashtag, has_tags
             if caption_text:
                 new_description = caption_text.upper()
@@ -1868,7 +1872,9 @@ class PostsViewList:
             logger.debug("No like button on this screen, give up scrolling for it.")
             return False
         # Reels: don't swipe to find like button — swipe changes reel
-        if self.device.find(resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME).exists():
+        if self.device.find(
+            resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
+        ).exists():
             logger.debug("Reels layout: no like button found, skip swipe retry.")
             return False
         UniversalActions(self.device)._swipe_points(
@@ -2279,6 +2285,21 @@ class OpenedPostView:
             return reels_like
         return None
 
+    @staticmethod
+    def _like_button_is_liked(like_button) -> bool:
+        """The heart signals its state via the selected flag and, on newer
+        layouts, via a content-desc of "Liked" instead of "Like"."""
+        try:
+            if like_button.get_selected():
+                return True
+        except DeviceFacade.JsonRpcError:
+            pass
+        try:
+            desc = (like_button.get_desc() or "").strip().lower()
+        except DeviceFacade.JsonRpcError:
+            desc = ""
+        return desc == "liked"
+
     def _is_post_liked(self) -> Tuple[Optional[bool], Optional[DeviceFacade.View]]:
         """
         Check if post is liked
@@ -2289,7 +2310,7 @@ class OpenedPostView:
         if not like_btn_view:
             return False, None
 
-        return like_btn_view.get_selected(), like_btn_view
+        return self._like_button_is_liked(like_btn_view), like_btn_view
 
     def like_post(self) -> bool:
         """
@@ -2311,10 +2332,13 @@ class OpenedPostView:
                     resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON)
                 )
             if like_button.exists(Timeout.SHORT):
+                if self._like_button_is_liked(like_button):
+                    logger.info("Post is already liked, nothing to do.")
+                    return True
                 logger.info("Liking post via the little heart ❤️.")
                 like_button.click()
                 UniversalActions.detect_block(self.device)
-                liked = like_button.get_selected()
+                liked = self._like_button_is_liked(like_button)
             else:
                 logger.error("Can't find the media container nor the like button!")
         elif post_media_view.exists():
@@ -2615,11 +2639,36 @@ class PostsGridView:
             return None, None, None
         content_desc = post_view.ui_info()["contentDescription"]
         if not content_desc:
-            # IG moved the grid cell description from the cell container to
-            # its inner image_button view (same shift the feed had in 447+).
-            inner_button = post_view.child(resourceId=ResourceID.IMAGE_BUTTON)
-            if inner_button.exists():
-                content_desc = inner_button.get_desc()
+            # IG 4xx keeps the grid cell itself silent and moved the
+            # description ("Photo by ... at row X, column Y") onto an inner
+            # image_button nested a couple of containers down. It can't be
+            # reached with child(), so pair it with the cell by bounds.
+            # Keep the outer read as the primary source.
+            try:
+                cell_bounds = post_view.get_bounds()
+            except DeviceFacade.JsonRpcError:
+                cell_bounds = None
+            if cell_bounds is not None:
+                image_buttons = self.device.find(
+                    resourceIdMatches=case_insensitive_re(ResourceID.IMAGE_BUTTON)
+                )
+                for index in range(image_buttons.count_items()):
+                    candidate = self.device.find(
+                        resourceIdMatches=case_insensitive_re(ResourceID.IMAGE_BUTTON),
+                        index=index,
+                    )
+                    try:
+                        candidate_bounds = candidate.get_bounds()
+                    except DeviceFacade.JsonRpcError:
+                        continue
+                    if (
+                        candidate_bounds["left"] >= cell_bounds["left"]
+                        and candidate_bounds["right"] <= cell_bounds["right"]
+                        and candidate_bounds["top"] >= cell_bounds["top"]
+                        and candidate_bounds["bottom"] <= cell_bounds["bottom"]
+                    ):
+                        content_desc = candidate.get_desc()
+                        break
         media_type, obj_count = PostsViewList.detect_media_type(content_desc)
         opened_post_view = OpenedPostView(self.device)
         for attempt in range(2):
