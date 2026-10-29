@@ -185,13 +185,13 @@ class CoreArguments(Plugin):
                 "metavar": 1,
                 "default": 1,
             },
-            {
-                "arg": "--timeout-scale",
-                "nargs": None,
-                "help": "divides the foreground-app check cache TTL (>1 checks more often, <1 less often)",
-                "metavar": 1,
-                "default": 1,
-            },
+        {
+            "arg": "--timeout-scale",
+            "nargs": None,
+            "help": "divides all UI wait timeouts and the foreground-app check cache TTL - speeds up (>1) or slows down (<1)",
+            "metavar": 1,
+            "default": 1,
+        },
             {
                 "arg": "--screen-sleep",
                 "help": "save your screen by turning it off during the inactive time, disabled by default",
