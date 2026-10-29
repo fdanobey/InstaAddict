@@ -732,6 +732,20 @@ class PostsViewList:
         self.device = device
         self.has_tags = False
 
+    def _is_reels_layout(self) -> bool:
+        """hashtag/place posts can open in the Reels-style clips viewer,
+        where the author row replaces all the feed-style containers.
+        The chrome may auto-hide while watching, so fall back to the
+        viewer containers when the author row is gone."""
+        for marker in (
+            ResourceID.CLIPS_AUTHOR_USERNAME,
+            ResourceID.CLIPS_VIEWER_CONTAINER,
+            ResourceID.CLIPS_VIDEO_CONTAINER,
+        ):
+            if self.device.find(resourceIdMatches=marker).exists():
+                return True
+        return False
+
     def swipe_to_fit_posts(self, swipe: SwipeTo):
         """calculate the right swipe amount necessary to swipe to next post in hashtag post view
         in order to make it available to other plug-ins I cut it in two moves"""
@@ -743,14 +757,11 @@ class PostsViewList:
 
         # move type: half photo
         if swipe == SwipeTo.HALF_PHOTO:
-            # Reels: full-screen video, no half-photo adjustment needed
-            clips_viewer = self.device.find(
-                resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
-            )
-            if clips_viewer.exists():
+            # Reels: full-screen media, there is no half-photo to fit and
+            # the generic swipe would land on the next reel instead.
+            if self._is_reels_layout():
                 logger.debug("Reels layout: skipping HALF_PHOTO adjustment.")
                 return
-            logger.debug("Adjusting post position for feed layout.")
             media_bounds = self._get_current_media_bounds(containers_content)
             if media_bounds is None:
                 logger.debug("Can't find media bounds, using screen fallback.")
@@ -774,11 +785,9 @@ class PostsViewList:
             logger.info(
                 "Scroll down to see next post.", extra={"color": f"{Fore.GREEN}"}
             )
-            # Reels: no gap_view, just swipe the full viewport to next reel
-            clips_viewer = self.device.find(
-                resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
-            )
-            if clips_viewer.exists():
+            # Reels: no gap_view between posts, a full viewport swipe is
+            # the only move that advances to the next reel.
+            if self._is_reels_layout():
                 logger.debug("Reels layout: swiping to next reel.")
                 self.device.swipe_points(
                     displayWidth / 2,
@@ -1005,13 +1014,20 @@ class PostsViewList:
 
     def _find_likers_container(self):
         universal_actions = UniversalActions(self.device)
-        # Reels: no feed-style likers container, skip the swipe loop
-        if self.device.find(
-            resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
-        ).exists():
-            logger.debug("Reels layout: skipping likers container lookup.")
+        # Reels-style viewers have no feed likes text: the count lives in
+        # the like_count button under the sidebar heart ("Like number isN.
+        # View likes"). Read it straight from there instead of swiping.
+        if self._is_reels_layout():
+            like_count = self.device.find(
+                resourceId=ResourceID.LIKE_COUNT,
+                className=ClassName.BUTTON,
+            )
+            if like_count.exists():
+                likes = self._get_number_of_likers_from_text(like_count.get_text())
+                logger.debug("Likers count found in Reels like_count button.")
+                return True, likes
+            logger.debug("Reels layout: no like_count button on this reel.")
             return False, 0
-        logger.debug("Entering feed-style likers container swipe loop.")
         containers_gap = ResourceID.GAP_VIEW_AND_FOOTER_SPACE
         media_container = ResourceID.MEDIA_CONTAINER
         likes = 0
@@ -1182,6 +1198,18 @@ class PostsViewList:
             likes = int(float(bare.group("n")) * mult)
             logger.info(f"This post has {likes} like(s).")
             return likes
+        # Reels like_count button: "Like number is328. View likes" (no
+        # space after "is", and the count may carry a k/m suffix).
+        reels_count = re.search(
+            r"like number is(?P<n>\d+(?:\.\d+)?)(?P<s>[kKmM]?)\b",
+            likes_view_text,
+            re.IGNORECASE,
+        )
+        if reels_count:
+            mult = {"": 1, "k": 1_000, "m": 1_000_000}[reels_count.group("s").lower()]
+            likes = int(float(reels_count.group("n")) * mult)
+            logger.info(f"This post has {likes} like(s).")
+            return likes
         matches_likes = re.search(
             r"(?P<likes>\d+(?:\.\d+)?)(?P<suffix>[kKmM]?)\s+(?:others|likes)\b",
             likes_view_text,
@@ -1225,6 +1253,18 @@ class PostsViewList:
         """Open likes container"""
         post_liked_by_a_following = False
         logger.info("Opening post likers.")
+        # Reels-style viewers show the count as a sidebar button ("Like
+        # number isN. View likes") that opens the likers bottom sheet.
+        if self._is_reels_layout():
+            reels_like_count = self.device.find(
+                resourceId=ResourceID.LIKE_COUNT,
+                className=ClassName.BUTTON,
+            )
+            if reels_like_count.exists():
+                logger.debug("Reels layout: opening likers from like_count button.")
+                reels_like_count.click()
+                DeviceFacade.sleep_mode(SleepTime.SHORT)
+                return
         facepil_stub = self.device.find(
             index=-1, resourceId=ResourceID.ROW_FEED_LIKE_COUNT_FACEPILE_STUB
         )
@@ -1420,23 +1460,20 @@ class PostsViewList:
             )
             if not has_media:
                 continue
-            for caption in captions:
-                if (
-                    header["bounds"]["top"]
-                    <= caption["bounds"]["top"]
-                    < next_header_top
-                ):
-                    logger.debug("Description found in current post hierarchy.")
-                    return caption["text"]
-        # Reels fallback: caption in content-desc of clips_caption_component descendant
-        clips_caption_id = ResourceID.CLIPS_CAPTION_COMPONENT
+        for caption in captions:
+            if header["bounds"]["top"] <= caption["bounds"]["top"] < next_header_top:
+                logger.debug("Description found in current post hierarchy.")
+                return caption["text"]
+        # Reels fallback: the caption lives in the content-desc of a
+        # clips_caption_component descendant, not in a feed text view.
         for node in root.iter("node"):
-            if node.attrib.get("resource-id") == clips_caption_id:
-                for desc_node in node.iter("node"):
-                    desc = desc_node.attrib.get("content-desc", "")
-                    if len(desc) > 5:
-                        logger.debug("Description found in Reels caption component.")
-                        return PostsViewList._normalize_ig_text(desc)
+            if node.attrib.get("resource-id") != ResourceID.CLIPS_CAPTION_COMPONENT:
+                continue
+            for desc_node in node.iter("node"):
+                desc = desc_node.attrib.get("content-desc", "")
+                if len(desc) > 5:
+                    logger.debug("Description found in Reels caption component.")
+                    return PostsViewList._normalize_ig_text(desc)
         return None
 
     def _check_if_last_post(
@@ -1499,6 +1536,11 @@ class PostsViewList:
                 )
                 return True, new_description, username, is_ad, is_hashtag, has_tags
             else:
+                # Reels: there is no feed-style description and swiping down
+                # would move to the next reel, so accept the missing caption.
+                if self._is_reels_layout():
+                    logger.debug("Reels layout: no caption found on this reel.")
+                    return False, "", username, is_ad, is_hashtag, has_tags
                 post_buttons = self.device.find(
                     resourceId=ResourceID.ROW_FEED_VIEW_GROUP_BUTTONS
                 )
@@ -1599,18 +1641,19 @@ class PostsViewList:
         """returns a tuple[var, bool, bool]"""
         is_ad = False
         is_hashtag = False
-        # Reels: get owner immediately, skip feed-style lookups and swipes
+        # Reels: the author row replaces the feed header, get the owner
+        # from it right away - the feed swipes below would change reel.
         clips_author = self.device.find(
             resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
         )
-        if clips_author.exists(Timeout.SHORT):
-            owner_name = clips_author.get_text()
-            logger.debug(f"Found owner via clips_author_username (Reels layout).")
+        if clips_author.exists():
+            logger.debug("Found owner via clips_author_username (Reels layout).")
             if mode == Owner.OPEN:
                 logger.info("Open post owner.")
                 clips_author.click()
                 return True, is_ad, is_hashtag
             elif mode == Owner.GET_NAME:
+                owner_name = clips_author.get_text()
                 return owner_name, is_ad, is_hashtag
             return True, is_ad, is_hashtag
         if username is None:

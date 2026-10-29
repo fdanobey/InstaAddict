@@ -81,6 +81,7 @@ class ResourceID:
             f"{APP_ID}:id/layout_comment_thread_post_button_icon"
         )
         self.LIKE_BUTTON = f"{APP_ID}:id/like_button"
+        self.LIKE_COUNT = f"{APP_ID}:id/like_count"
         self.LIVE_BADGE_VIEW = f"{APP_ID}:id/live_badge_view"
         self.MEDIA_GROUP = f"{APP_ID}:id/media_group"
         self.MEDIA_SET_ROW = f"{APP_ID}:id/media_set_row_content_identifier"
