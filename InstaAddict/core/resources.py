@@ -76,6 +76,7 @@ class ResourceID:
         self.LIKE_BUTTON = f"{APP_ID}:id/like_button"
         self.LIVE_BADGE_VIEW = f"{APP_ID}:id/live_badge_view"
         self.MEDIA_GROUP = f"{APP_ID}:id/media_group"
+        self.MEDIA_SET_ROW = f"{APP_ID}:id/media_set_row_content_identifier"
         self.MEDIA_CONTENT_LOCATION = f"{APP_ID}:id/media_content_location"
         self.MENU_SETTINGS_ROW = f"{APP_ID}:id/menu_settings_row"
         self.MENU_OPTION_TEXT = f"{APP_ID}:id/menu_option_text"
