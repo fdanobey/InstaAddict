@@ -980,22 +980,21 @@ def _follow(device, username, follow_percentage, args, session_state, swipe_amou
 
 def _close_story_view(story_view: CurrentStoryView, username: str):
     """Close the story viewer even when IG already advanced to another
-    user's story: press back until the viewer is gone (the target's
-    profile must be underneath again)."""
+    user's story: press back while any story frame is still showing so
+    the target's profile ends up underneath again."""
     for _ in range(4):
         try:
             shown = story_view.getUsername().strip().casefold()
         except Exception:
             shown = ""
-        if shown != username.casefold() and shown:
+        if shown and shown != username.casefold():
             logger.debug(
                 f"Story viewer advanced to another user ({shown}). Closing it."
             )
-            device_back_open = story_view.getStoryFrame().exists(Timeout.ZERO)
-            if not device_back_open:
-                break
-            story_view.device.back()
-            story_view.getStoryFrame().wait_gone(Timeout.SHORT)
+        if not story_view.getStoryFrame().exists(Timeout.ZERO):
+            break
+        story_view.device.back()
+        story_view.getStoryFrame().wait_gone(Timeout.SHORT)
 
 
 def _watch_stories(
