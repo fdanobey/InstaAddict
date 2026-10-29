@@ -3302,6 +3302,13 @@ class ProfileView(ActionBarView):
                 )
                 continue
 
+        if not element_to_swipe_over_obj.exists():
+            logger.warning(
+                "profile_tabs_container not found: the profile grid isn't visible "
+                "(a story/media viewer probably stayed open). Skip."
+            )
+            return -1
+
         element_to_swipe_over = element_to_swipe_over_obj.get_bounds()["top"]
 
         def _get_swipe_anchor():

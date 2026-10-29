@@ -989,6 +989,26 @@ def _follow(device, username, follow_percentage, args, session_state, swipe_amou
     return False
 
 
+def _close_story_view(story_view: CurrentStoryView, username: str):
+    """Close the story viewer even when IG already advanced to another
+    user's story: press back until the viewer is gone (the target's
+    profile must be underneath again)."""
+    for _ in range(4):
+        try:
+            shown = story_view.getUsername().strip().casefold()
+        except Exception:
+            shown = ""
+        if shown != username.casefold() and shown:
+            logger.debug(
+                f"Story viewer advanced to another user ({shown}). Closing it."
+            )
+            device_back_open = story_view.getStoryFrame().exists(Timeout.ZERO)
+            if not device_back_open:
+                break
+            story_view.device.back()
+            story_view.getStoryFrame().wait_gone(Timeout.SHORT)
+
+
 def _watch_stories(
     device: DeviceFacade,
     profile_view: ProfileView,
@@ -1085,29 +1105,18 @@ def _watch_stories(
                             "Ignore this error! Stories ended while we were interacting with it."
                         )
                         break
-                for _ in range(4):
-                    if (
-                        story_view.getUsername().strip().casefold()
-                        == username.casefold()
-                    ):
-                        device.back()
-                    else:
-                        break
-                session_state.check_limit(
-                    limit_type=session_state.Limit.WATCHES, output=True
-                )
-                logger.info(
-                    f"Watched stories for {(datetime.now()-start).total_seconds():.2f}s."
-                )
-                return stories_counter
-            else:
-                logger.warning("Failed to open the story container.")
-                logger.debug(f"Story username: {story_username}")
-                save_crash(device)
-                if story_frame.exists():
-                    device.back()
-                return 0
-        return 0
+        _close_story_view(story_view, username)
+        session_state.check_limit(limit_type=session_state.Limit.WATCHES, output=True)
+        logger.info(
+            f"Watched stories for {(datetime.now()-start).total_seconds():.2f}s."
+        )
+        return stories_counter
     else:
+        logger.warning("Failed to open the story container.")
+        logger.debug(f"Story username: {story_username}")
+        save_crash(device)
+        if story_frame.exists():
+            device.back()
+        return 0
         logger.info("Reached total watch limit, not watching stories.")
         return 0
