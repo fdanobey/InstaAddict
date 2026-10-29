@@ -16,6 +16,7 @@ class ResourceID:
         self.ACTION_BAR_TITLE_AUTO_SIZE = (
             f"{APP_ID}:id/action_bar_large_title_auto_size"
         )
+        self.ACTION_BAR_TITLE_VIEW = f"{APP_ID}:id/action_bar_title_view"
         self.ACTION_BAR_TITLE_CHEVRON = f"{APP_ID}:id/action_bar_title_chevron"
         self.ACTION_ICON = f"{APP_ID}:id/action_icon"
         self.ACTION_SHEET_ROW_TEXT_VIEW = f"{APP_ID}:id/action_sheet_row_text_view"
@@ -82,6 +83,7 @@ class ResourceID:
         self.LIKE_BUTTON = f"{APP_ID}:id/like_button"
         self.LIVE_BADGE_VIEW = f"{APP_ID}:id/live_badge_view"
         self.MEDIA_GROUP = f"{APP_ID}:id/media_group"
+        self.MEDIA_SET_ROW = f"{APP_ID}:id/media_set_row_content_identifier"
         self.MEDIA_CONTENT_LOCATION = f"{APP_ID}:id/media_content_location"
         self.MENU_SETTINGS_ROW = f"{APP_ID}:id/menu_settings_row"
         self.MENU_OPTION_TEXT = f"{APP_ID}:id/menu_option_text"

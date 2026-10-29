@@ -47,6 +47,53 @@ def case_insensitive_re(str_list):
     return f"(?i)({strings})"
 
 
+def find_reels_like_button(device):
+    """Find the reel-viewer sidebar heart (id/like_button).
+
+    Instagram reuses id/like_button for the Notes heart on profile grids
+    ("Tap to like note"), so require the Like/Liked content-desc to make
+    sure a note is never mistaken for a post heart."""
+    return device.find(
+        resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
+        descriptionMatches=case_insensitive_re("^(Like|Liked)$"),
+    )
+
+
+def _reels_heart_is_liked(like_button) -> bool:
+    """Is the reel/post heart currently in the liked state?
+
+    Instagram's 2026-10 reel viewer stopped updating the accessibility
+    state of id/like_button: selected stays false and the content-desc
+    stays "Like" whether the reel is liked or not (the jsonrpc info is
+    simply stale). On that layout the heart swaps its icon ImageViews
+    instead, so fall back to comparing the number of child views.
+    Older builds toggle selected / "Liked" as before, and those signals
+    are checked first."""
+    try:
+        if like_button.get_selected():
+            return True
+    except DeviceFacade.JsonRpcError:
+        pass
+    try:
+        desc = (like_button.get_desc() or "").strip().lower()
+    except DeviceFacade.JsonRpcError:
+        desc = ""
+    if desc == "liked":
+        return True
+    # New layout: liked shows the filled heart as an extra overlay
+    # ImageView child; unliked keeps a single one. child(index) applies
+    # the className filter before indexing, which excludes text nodes.
+    try:
+        overlay = like_button.child(
+            index=1, classNameMatches=case_insensitive_re(ClassName.IMAGE_VIEW)
+        )
+        if overlay.exists():
+            return True
+    except DeviceFacade.JsonRpcError:
+        pass
+    return False
+
+
 class TabBarTabs(Enum):
     HOME = auto()
     SEARCH = auto()
@@ -1402,7 +1449,7 @@ class PostsViewList:
         )
         username = PostsViewList._normalize_ig_text(username)
         has_tags = self._has_tags()
-        for _ in range(3):
+        for _ in range(8):
             post_description = self.device.find(
                 index=-1,
                 resourceIdMatches=ResourceID.ROW_FEED_TEXT,
@@ -1694,10 +1741,11 @@ class PostsViewList:
         """A feed post is not one container: its media and its buttons row are flat
         siblings of the list. Pair them by geometry - the buttons row starts where
         the media ends - so the heart pressed belongs to the post interacted with."""
+
         buttons = self.device.find(resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE)
         if not buttons.exists():
-            # Reels fallback: sidebar like_button
-            reels_like = self.device.find(resourceIdMatches=ResourceID.LIKE_BUTTON)
+            # Reels fallback: sidebar like_button (never the Notes heart)
+            reels_like = find_reels_like_button(self.device)
             if reels_like.exists():
                 logger.debug("Using Reels sidebar like_button.")
                 return reels_like
@@ -1849,8 +1897,9 @@ class PostsViewList:
             resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
         )
         if not bnt_like_obj.exists():
-            # Reels: like_button uses selected=true when liked (not content-desc)
-            reels_like = self.device.find(resourceIdMatches=ResourceID.LIKE_BUTTON)
+            # Reels: like_button uses selected=true when liked (not
+            # content-desc). Filter out the Notes heart reusing the id.
+            reels_like = find_reels_like_button(self.device)
             if reels_like.exists(Timeout.SHORT):
                 is_selected = reels_like.get_selected()
                 logger.debug(f"Reels like_button selected={is_selected}")
@@ -1871,7 +1920,7 @@ class PostsViewList:
         if attempts <= 0:
             logger.debug("No like button on this screen, give up scrolling for it.")
             return False
-        # Reels: don't swipe to find like button — swipe changes reel
+        # Reels: don't swipe to find like button - swipe changes reel
         if self.device.find(
             resourceIdMatches=ResourceID.CLIPS_AUTHOR_USERNAME
         ).exists():
@@ -2201,7 +2250,10 @@ class OpenedPostView:
         self.has_tags = False
 
     def is_post_opened(self) -> bool:
-        """Confirm a post detail or the reels viewer is actually showing."""
+        """Confirm a post detail or the reels viewer is actually showing.
+        The reel sidebar like_button must be matched by desc (Like/Liked):
+        on a profile grid the same id belongs to the Notes heart and would
+        wrongly confirm a post as opened."""
         post_media = self.device.find(
             resourceIdMatches=case_insensitive_re(
                 "|".join(
@@ -2209,12 +2261,13 @@ class OpenedPostView:
                         ResourceID.MEDIA_CONTAINER,
                         ResourceID.VIDEO_CONTAINER_AND_CLIPS_VIDEO_CONTAINER,
                         ResourceID.ROW_FEED_BUTTON_LIKE,
-                        ResourceID.LIKE_BUTTON,
                     ]
                 )
             )
         )
-        return post_media.exists(Timeout.MEDIUM)
+        if post_media.exists(Timeout.MEDIUM):
+            return True
+        return find_reels_like_button(self.device).exists(Timeout.SHORT)
 
     def detect_opened_media_type(self) -> MediaType:
         """Detect the media type from the opened post itself.
@@ -2256,6 +2309,35 @@ class OpenedPostView:
         )
         return MediaType.PHOTO
 
+    def _get_media_view(self) -> Optional[DeviceFacade.View]:
+        """The opened-post viewer keeps thin slivers of the previous/next
+        post at the screen edges; they match MEDIA_CONTAINER but are not
+        the post being watched. Pick the biggest container instead of the
+        first match, which is what sent double taps into a 300px strip."""
+        candidates = self.device.find(
+            resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER)
+        )
+        if not candidates.exists():
+            return None
+        best = None
+        best_area = 0
+        for index in range(candidates.count_items()):
+            candidate = self.device.find(
+                resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER),
+                index=index,
+            )
+            try:
+                bounds = candidate.get_bounds()
+            except DeviceFacade.JsonRpcError:
+                continue
+            area = (bounds["right"] - bounds["left"]) * (
+                bounds["bottom"] - bounds["top"]
+            )
+            if area > best_area:
+                best = candidate
+                best_area = area
+        return best
+
     def _get_post_like_button(self) -> Optional[DeviceFacade.View]:
         post_media_view = self.device.find(resourceIdMatches=ResourceID.MEDIA_CONTAINER)
         if post_media_view.exists(Timeout.MEDIUM):
@@ -2265,22 +2347,35 @@ class OpenedPostView:
                     resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
                 )
                 if like_button.viewV2 is not None or attempt == 3:
-                    return like_button if like_button.exists() else None
+                    if like_button.exists():
+                        return like_button
+                    # The paired lookup failed (e.g. the media container
+                    # matched was a sliver of a scrolled post, or the heart
+                    # lost its resource-id). Fall through to the flat
+                    # fallbacks below instead of giving up.
+                    break
                 UniversalActions(self.device)._swipe_points(
                     direction=Direction.DOWN, delta_y=100
                 )
                 attempt += 1
-        # IG dropped zoomable_view_container from plain photos (bare media_group
-        # remains), so MEDIA_CONTAINER no longer matches them. Without this
-        # fallback _is_post_liked can't see an already-liked photo and the
-        # heart click toggles the like OFF.
+        # IG 4xx flattened the opened post: the heart is no longer below a
+        # media container but a flat sibling of the media, inside the buttons
+        # row. Fallback to the button itself.
         like_button = self.device.find(
-            resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
+            resourceIdMatches=case_insensitive_re(ResourceID.ROW_FEED_BUTTON_LIKE)
         )
         if like_button.exists(Timeout.SHORT):
             return like_button
-        # Reels fallback: sidebar like_button
-        reels_like = self.device.find(resourceIdMatches=ResourceID.LIKE_BUTTON)
+        # Newer viewers keep a heart Button with no resource-id at all —
+        # pair it by desc.
+        heart_by_desc = self.device.find(
+            classNameMatches=case_insensitive_re(ClassName.BUTTON_OR_TEXTVIEW_REGEX),
+            descriptionMatches=case_insensitive_re("^Like$"),
+        )
+        if heart_by_desc.exists(Timeout.SHORT):
+            return heart_by_desc
+        # Reels fallback: sidebar like_button (never the Notes heart)
+        reels_like = find_reels_like_button(self.device)
         if reels_like.exists():
             return reels_like
         return None
@@ -2318,19 +2413,15 @@ class OpenedPostView:
         :return: post has been liked
         :rtype: bool
         """
-        post_media_view = self.device.find(
-            resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER)
-        )
+        post_media_view = self._get_media_view()
         liked = False
-        if not post_media_view.exists():
+        if post_media_view is None:
             like_button = self.device.find(
                 resourceIdMatches=case_insensitive_re(ResourceID.ROW_FEED_BUTTON_LIKE)
             )
             if not like_button.exists(Timeout.SHORT):
-                # Reels fallback: sidebar like_button
-                like_button = self.device.find(
-                    resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON)
-                )
+                # Reels fallback: sidebar like_button (never the Notes heart)
+                like_button = find_reels_like_button(self.device)
             if like_button.exists(Timeout.SHORT):
                 if self._like_button_is_liked(like_button):
                     logger.info("Post is already liked, nothing to do.")
@@ -2338,10 +2429,11 @@ class OpenedPostView:
                 logger.info("Liking post via the little heart ❤️.")
                 like_button.click()
                 UniversalActions.detect_block(self.device)
+                DeviceFacade.sleep_mode(SleepTime.SHORT)
                 liked = self._like_button_is_liked(like_button)
             else:
                 logger.error("Can't find the media container nor the like button!")
-        elif post_media_view.exists():
+        else:
             logger.info("Liking post.")
             if self.has_tags:
                 logger.info(
@@ -2350,16 +2442,29 @@ class OpenedPostView:
                 like_button = self._get_post_like_button()
                 if like_button is not None:
                     like_button.click()
-                    liked = like_button.get_selected()
+                    UniversalActions.detect_block(self.device)
+                    DeviceFacade.sleep_mode(SleepTime.SHORT)
+                    liked = self._like_button_is_liked(like_button)
                 else:
                     logger.warning("Can't find the like button object!")
             else:
                 post_media_view.double_click()
+                UniversalActions.detect_block(self.device)
+                DeviceFacade.sleep_mode(SleepTime.SHORT)
                 liked, like_button = self._is_post_liked()
                 if not liked and like_button is not None:
                     logger.info("Double click failed, clicking on the little heart ❤️.")
                     like_button.click()
-                    liked = like_button.get_selected()
+                    UniversalActions.detect_block(self.device)
+                    DeviceFacade.sleep_mode(SleepTime.SHORT)
+                    liked, like_button2 = self._is_post_liked()
+                    if not liked and like_button2 is not None:
+                        # One more tap on a freshly resolved heart, the
+                        # first may have resolved a stale node.
+                        like_button2.click()
+                        UniversalActions.detect_block(self.device)
+                        DeviceFacade.sleep_mode(SleepTime.SHORT)
+                        liked = self._is_post_liked()[0]
         return liked
 
     def start_video(self) -> bool:
@@ -2387,10 +2492,8 @@ class OpenedPostView:
         if in_fullscreen:
             logger.debug("Video is already in full screen.")
             return True
-        post_media_view = self.device.find(
-            resourceIdMatches=case_insensitive_re(ResourceID.MEDIA_CONTAINER)
-        )
-        if post_media_view.exists():
+        post_media_view = self._get_media_view()
+        if post_media_view is not None:
             logger.info("Going in full screen.")
             post_media_view.click()
             in_fullscreen, _ = self._is_video_in_fullscreen()
@@ -2502,18 +2605,16 @@ class OpenedPostView:
         """
         Check if video has been liked
         """
-        like_button = self.device.find(
-            resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON)
-        )
+        like_button = find_reels_like_button(self.device)
         if like_button.exists():
-            return like_button.get_selected(), like_button
+            return _reels_heart_is_liked(like_button), like_button
         # Reels/videos opened in the post viewer (feed-style layout) use the
         # feed like button, not the fullscreen sidebar one.
         feed_like_button = self.device.find(
             resourceIdMatches=case_insensitive_re(ResourceID.ROW_FEED_BUTTON_LIKE)
         )
         if feed_like_button.exists():
-            return feed_like_button.get_selected(), feed_like_button
+            return _reels_heart_is_liked(feed_like_button), feed_like_button
         return False, None
 
     def _is_video_liked_with_reveal(
@@ -2542,6 +2643,25 @@ class OpenedPostView:
         self.has_tags = tags_icon.exists()
         return self.has_tags
 
+    def _is_video_liked_with_reveal(
+        self,
+    ) -> Tuple[Optional[bool], Optional[DeviceFacade.View]]:
+        """Same as _is_video_liked, but when no like button is visible at all
+        and the video is fullscreen, tap once to reveal the reel viewer chrome
+        (IG hides the action bar until a tap) and re-check."""
+        liked, like_button = self._is_video_liked()
+        if like_button is not None:
+            return liked, like_button
+        full_screen, video = self._is_video_in_fullscreen()
+        if full_screen:
+            logger.debug("Revealing video chrome to check the like state...")
+            video.click()
+            # exists() polls with a 0s timeout by default, so wait for the
+            # chrome to render before re-checking.
+            DeviceFacade.sleep_mode(SleepTime.SHORT)
+            liked, like_button = self._is_video_liked()
+        return liked, like_button
+
     def like_video(self) -> bool:
         """
         Like the video with a double click and check if it's liked
@@ -2563,15 +2683,27 @@ class OpenedPostView:
                 logger.debug("Showing sidebar...")
                 obj.click()
                 DeviceFacade.sleep_mode(SleepTime.SHORT)
-                liked, like_button = self._is_video_liked()
+            # Both the double tap and the heart register asynchronously and,
+            # on the 2026-10 reel viewer, the accessibility state never
+            # flips at all (see _reels_heart_is_liked). Give the animation
+            # time to settle before verifying, otherwise a working like is
+            # reported as failed and the retry click unlikes the reel.
+            DeviceFacade.sleep_mode(SleepTime.SHORT)
+            liked, like_button = self._is_video_liked()
             if not liked:
                 logger.info("Double click failed, clicking on the little heart ❤️.")
                 if like_button is not None:
                     like_button.click()
                     UniversalActions.detect_block(self.device)
-                else:
-                    logger.error("We are seeing another video.")
-                    liked, _ = self._is_video_liked()
+                    # The heart click registers asynchronously: the icon
+                    # overlay / selected flag only settle after the
+                    # animation. Re-verify on a freshly resolved heart
+                    # instead of trusting the stale node.
+                    DeviceFacade.sleep_mode(SleepTime.SHORT)
+                    liked, _ = self._is_video_liked_with_reveal()
+        else:
+            logger.error("We are seeing another video.")
+            liked, _ = self._is_video_liked()
         return liked
 
     def _getListViewLikers(self):
@@ -2628,10 +2760,27 @@ class PostsGridView:
         )
         return profile_tabs.exists(Timeout.SHORT)
 
+    def _get_grid_row(self, post_list_view, row: int):
+        """Return the Nth row of post cells from the grid list.
+
+        Instagram flip-flops between builds on whether the grid list starts
+        with a tiny gap_binder_group spacer View: some builds put the first
+        post row at raw child index 0, the 2026-10 build inserts the spacer
+        at index 0 and shifts every row one position later. A static offset
+        is wrong on one of the two layouts (the bot clicked cell N+1, or
+        nothing at the last row, and the failed opens piled up crash
+        dumps). Probe where the first LinearLayout row sits and index from
+        there, so both layouts are handled without a version check."""
+        if post_list_view.child(index=0, className=ClassName.LINEAR_LAYOUT).exists():
+            base = 0
+        else:
+            base = 1  # gap_binder_group spacer occupies raw index 0
+        return post_list_view.child(index=base + row, className=ClassName.LINEAR_LAYOUT)
+
     def navigateToPost(self, row, col):
         post_list_view = self._get_post_view()
         post_list_view.wait(Timeout.MEDIUM)
-        row_view = post_list_view.child(index=row)
+        row_view = self._get_grid_row(post_list_view, row)
         if not row_view.exists():
             return None, None, None
         post_view = row_view.child(index=col)
@@ -2708,6 +2857,7 @@ class ProfileView(ActionBarView):
                 ResourceID.ACTION_BAR_TEXTVIEW_TITLE,
                 ResourceID.ACTION_BAR_TITLE_AUTO_SIZE,
                 ResourceID.ACTION_BAR_LARGE_TITLE_AUTO_SIZE,
+                ResourceID.ACTION_BAR_TITLE_VIEW,
             ]
         )
         action_bar = self.device.find(
@@ -2946,17 +3096,36 @@ class ProfileView(ActionBarView):
         )
         if not grid_post.exists(Timeout.MEDIUM):
             return 0, 0
-        for i in range(2, 6):
-            lin_layout = grid_post.child(index=i, className=ClassName.LINEAR_LAYOUT)
-            if i == 5 or not lin_layout.exists():
-                last_index = i - 1
-                last_lin_layout = grid_post.child(index=last_index)
-                for n in range(1, 4):
-                    if n == 3 or not last_lin_layout.child(index=n).exists():
-                        if n == 3:
-                            return last_index, 0
-                        else:
-                            return last_index - 1, n
+        # Count rows with the same base-detection used by _get_grid_row so
+        # the gap_binder_group spacer some builds put at raw index 0 is
+        # never mistaken for (nor shifts) a post row.
+        base = (
+            0
+            if grid_post.child(index=0, className=ClassName.LINEAR_LAYOUT).exists()
+            else 1
+        )
+        row_count = 0
+        while row_count < 5:
+            lin_layout = grid_post.child(
+                index=base + row_count, className=ClassName.LINEAR_LAYOUT
+            )
+            if not lin_layout.exists():
+                break
+            row_count += 1
+        last_index = row_count - 1
+        if last_index < 0:
+            return 0, 0
+        last_lin_layout = grid_post.child(
+            index=base + last_index, className=ClassName.LINEAR_LAYOUT
+        )
+        for n in range(0, 4):
+            if n == 3 or not last_lin_layout.child(index=n).exists():
+                if n == 3:
+                    # every row on screen is complete
+                    return row_count, 0
+                else:
+                    # the bottom row is partially filled
+                    return row_count - 1, n
 
     def getProfileInfo(self):
         username = self.getUsername()

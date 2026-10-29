@@ -296,7 +296,7 @@ def interact_with_user(
                     if video_opened:
                         # The pre-check above runs on the profile grid, before
                         # the reel viewer has rendered its like button, so it
-                        # can't see an already-liked video. Re-check now that
+                        # cannot see an already-liked video. Re-check now that
                         # the viewer is fullscreen; this also reveals hidden
                         # reel chrome to reach the like button.
                         already_liked, _ = (
