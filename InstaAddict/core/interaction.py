@@ -1093,20 +1093,23 @@ def _watch_stories(
                             "Ignore this error! Stories ended while we were interacting with it."
                         )
                         break
-            _close_story_view(story_view, username)
-            session_state.check_limit(
-                limit_type=session_state.Limit.WATCHES, output=True
-            )
-            logger.info(
-                f"Watched stories for {(datetime.now()-start).total_seconds():.2f}s."
-            )
-            return stories_counter
+                _close_story_view(story_view, username)
+                session_state.check_limit(
+                    limit_type=session_state.Limit.WATCHES, output=True
+                )
+                logger.info(
+                    f"Watched stories for {(datetime.now()-start).total_seconds():.2f}s."
+                )
+                return stories_counter
+            else:
+                logger.warning("Failed to open the story container.")
+                logger.debug(f"Story username: {story_username}")
+                save_crash(device)
+                if story_frame.exists():
+                    device.back()
+                return 0
         else:
-            logger.warning("Failed to open the story container.")
-            logger.debug(f"Story username: {story_username}")
-            save_crash(device)
-            if story_frame.exists():
-                device.back()
+            # profile has no story ring: nothing to watch
             return 0
     else:
         logger.info("Reached total watch limit, not watching stories.")
