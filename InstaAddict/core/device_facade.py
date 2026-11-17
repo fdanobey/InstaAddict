@@ -174,6 +174,8 @@ class DeviceFacade:
                             "Foreground re-check recovered after a transient"
                             f" flip on attempt {attempt + 1}; Instagram is still open."
                         )
+                        self._last_ig_open_result = True
+                        self._last_ig_open_check = time.monotonic()
                         break
                 else:
                     logger.debug(
